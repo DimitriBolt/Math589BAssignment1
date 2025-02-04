@@ -31,11 +31,11 @@ def initialize_protein(n_beads, dimension=3, fudge=1e-5):
 # 2. Potential Functions
 # ------------------------------
 # Lennard-Jones potential and derivative
-def lennard_jones_potential(r, epsilon=1.0, sigma=1.0):
+def lennard_jones_potential(r, epsilon=2.0, sigma=1.0):
     """Compute Lennard-Jones potential between two beads."""
     return 4 * epsilon * ((sigma / r)**12 - (sigma / r)**6)
 
-def lennard_jones_deriv(r, epsilon=1.0, sigma=1.0):
+def lennard_jones_deriv(r, epsilon=2.0, sigma=1.0):
     """Compute the derivative dV/dr of the Lennard-Jones potential."""
     return 4 * epsilon * (-12 * sigma**12 / r**13 + 6 * sigma**6 / r**7)
 
@@ -70,7 +70,7 @@ def bond_energy_and_grad(positions, n_beads, b=1.0, k_b=100.0):
 # ------------------------------
 # 4a. Vectorized LJ Energy and Gradient with Cutoff
 # ------------------------------
-def lj_energy_and_grad_vectorized(positions, epsilon=1.0, sigma=1.0, cutoff=3.0):
+def lj_energy_and_grad_vectorized(positions, epsilon=2.0, sigma=1.0, cutoff=5.0):
     """
     Compute Lennard-Jones energy and gradient in a vectorized manner using pdist/squareform.
     
@@ -152,8 +152,11 @@ if USE_NUMBA:
 # ------------------------------
 # 5. Total Energy and Gradient Function
 # ------------------------------
-def total_energy_grad(positions, n_beads, epsilon=1.0, sigma=1.0, b=1.0, k_b=100.0,
-                      cutoff=3.0, use_numba=True):
+def total_energy_grad(positions, n_beads, 
+                      epsilon=2.0, sigma=1.0,  # increased epsilon for stronger attraction
+                      b=1.0, k_b=100.0, 
+                      cutoff=5.0,             # extended cutoff to capture more LJ interactions
+                      use_numba=True):
     """
     Compute the total energy and its gradient for the protein configuration.
     
@@ -185,14 +188,16 @@ def total_energy_grad(positions, n_beads, epsilon=1.0, sigma=1.0, b=1.0, k_b=100
     return total_energy_val, total_grad.flatten()
 
 # Wrapper for energy only (used by the optimizer)
-def total_energy_wrapper(positions, n_beads, epsilon=1.0, sigma=1.0, b=1.0, k_b=100.0):
+def total_energy_wrapper(positions, n_beads, 
+                         epsilon=2.0, sigma=1.0, 
+                         b=1.0, k_b=100.0):
     energy, _ = total_energy_grad(positions, n_beads, epsilon, sigma, b, k_b)
     return energy
 
 # ------------------------------
 # 6. Optimization Function Using L-BFGS-B
 # ------------------------------
-def optimize_protein(positions, n_beads, write_csv=False, maxiter=10000, tol=1e-6):
+def optimize_protein(positions, n_beads, write_csv=False, maxiter=1000, tol=1e-6):
     """
     Optimize the positions of the protein to minimize total energy.
     
@@ -284,7 +289,7 @@ if __name__ == "__main__":
     plot_protein_3d(initial_positions, title="Initial Configuration")
 
     # Optimize using L-BFGS-B with analytical gradient
-    result, trajectory = optimize_protein(initial_positions, n_beads, write_csv=True, maxiter=10000, tol=1e-6)
+    result, trajectory = optimize_protein(initial_positions, n_beads, write_csv=True, maxiter=1000, tol=1e-6)
 
     optimized_positions = result.x.reshape((n_beads, dimension))
     print("Optimized Energy:", total_energy_wrapper(optimized_positions.flatten(), n_beads))
