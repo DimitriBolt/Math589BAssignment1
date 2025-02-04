@@ -4,6 +4,35 @@ from mpl_toolkits.mplot3d import Axes3D
 from matplotlib.animation import FuncAnimation
 
 # -----------------------------
+# Helper: Target Energy based on n_beads
+# -----------------------------
+def get_target_energy(n_beads):
+    """
+    Return the target energy based on the number of beads.
+    
+    For example:
+      - if n_beads == 10, target energy is -25.
+      - if n_beads == 100, target energy is -450.
+      - if n_beads == 200, target energy is -945.
+    """
+    if n_beads == 10:
+        return -25.0
+    elif n_beads == 100:
+        return -450.0
+    elif n_beads == 200:
+        return -945.0
+    else:
+        # For other cases, you might use a linear scaling or another heuristic.
+        # Here, we choose a simple linear interpolation between the known points.
+        # For n_beads between 10 and 100:
+        if n_beads < 100:
+            # slope = (-450 - (-25))/(100 - 10) = (-425/90)
+            return -25.0 + (n_beads - 10) * (-425.0/90.0)
+        else:
+            # For n_beads > 100, slope = (-945 - (-450))/(200-100)= -495/100 = -4.95 per bead
+            return -450.0 + (n_beads - 100) * (-4.95)
+
+# -----------------------------
 # Initialization
 # -----------------------------
 def initialize_protein(n_beads, dimension=3, fudge=1e-5):
@@ -79,8 +108,8 @@ def total_energy_with_grad(x, n_beads, epsilon=1.0, sigma=1.0, b=1.0, k_b=100.0)
     LJ_energy = 4 * epsilon * ((sigma / r_valid)**12 - (sigma / r_valid)**6)
     energy += np.sum(LJ_energy)
     dE_dr = 4 * epsilon * (-12 * sigma**12 / r_valid**13 + 6 * sigma**6 / r_valid**7)
-    diff_ij = diff[idx_i, idx_j]
-    diff_valid = diff_ij[valid]
+    diff_ij = diff[idx_i, idx_j]  # shape (num_pairs, n_dim)
+    diff_valid = diff_ij[valid]   # shape (num_valid, n_dim)
     contrib = (dE_dr[:, None] / r_valid[:, None]) * diff_valid
     valid_i = idx_i[valid]
     valid_j = idx_j[valid]
@@ -105,7 +134,7 @@ def bfgs_optimize(func, x0, args, maxiter=1000, tol=1e-6, alpha0=1.0, beta=0.5, 
       alpha0  : initial step size.
       beta    : reduction factor for backtracking.
       c       : Armijo parameter.
-    
+      
     Returns:
       x       : optimized parameters.
       trajectory : list of iterates.
@@ -153,38 +182,36 @@ def bfgs_optimize(func, x0, args, maxiter=1000, tol=1e-6, alpha0=1.0, beta=0.5, 
     return x, trajectory
 
 # -----------------------------
-# Optimize Protein with Multi-Start Perturbation
+# Optimize Protein with Perturbed Restarts and Dynamic Target Energy
 # -----------------------------
-def optimize_protein(positions, n_beads, write_csv=False, maxiter=10000, tol=1e-4):
+def optimize_protein(positions, n_beads, write_csv=False, maxiter=10000, tol=1e-4, target_energy=None):
     """
     Optimize the positions of the protein to minimize total energy using our custom BFGS with backtracking.
-    If the final energy is above target_energy, perform a few perturbed restarts.
+    
+    The target energy is chosen based on n_beads if not provided:
+      - 10 beads  -> target energy = -25
+      - 100 beads -> target energy = -450
+      - 200 beads -> target energy = -945
     
     Parameters:
-      positions : (n_beads, d) array of initial positions.
-      n_beads   : number of beads.
-      write_csv : if True, save final configuration to CSV.
-      maxiter   : maximum iterations for BFGS.
-      tol       : tolerance for gradient norm.
-      target_energy : required energy threshold (e.g., -450.0 for 100 beads).
+      positions   : (n_beads, d) array of initial positions.
+      n_beads     : number of beads.
+      write_csv   : if True, save final configuration to CSV.
+      maxiter     : maximum iterations for BFGS.
+      tol         : tolerance for gradient norm.
+      target_energy : desired target energy. If None, computed based on n_beads.
     
     Returns:
-      result     : dict with keys 'x' (optimized flattened positions) and 'f' (final energy).
-      trajectory : list of intermediate configurations.
+      result      : dict with keys 'x' (optimized flattened positions) and 'f' (final energy).
+      trajectory  : list of intermediate configurations.
     """
+    if target_energy is None:
+        target_energy = get_target_energy(n_beads)
+    
     x0 = positions.flatten()
     args = (n_beads,)
     
-    if n_beads == 10:
-        target_energy = -20
-    elif n_beads == 100:
-        target_energy = -455
-    elif n_beads == 200:
-        target_energy == -945
-    else:
-        target_energy == 0
-
-    # First BFGS run.
+    # First run of our custom BFGS.
     x_opt, traj = bfgs_optimize(total_energy_with_grad, x0, args, maxiter=maxiter, tol=tol)
     f_final, _ = total_energy_with_grad(x_opt, n_beads)
     print(f"Initial BFGS: f = {f_final:.6f}")
@@ -193,10 +220,10 @@ def optimize_protein(positions, n_beads, write_csv=False, maxiter=10000, tol=1e-
     best_x = x_opt.copy()
     best_traj = traj.copy()
     
-    # If the energy is not deep enough, try a few perturbed restarts.
+    # If the energy is not below the target, try a few perturbed restarts.
     if best_energy > target_energy:
         n_perturb = 3
-        noise_scale = 1e-1  # adjust this scale as needed
+        noise_scale = 1e-1  # adjust as needed
         for i in range(n_perturb):
             print(f"Perturbed restart {i+1}...")
             x_perturbed = best_x + np.random.normal(scale=noise_scale, size=best_x.shape)
@@ -208,7 +235,7 @@ def optimize_protein(positions, n_beads, write_csv=False, maxiter=10000, tol=1e-
                 best_x = x_new.copy()
                 best_traj = traj_new.copy()
     
-    print(f"Final energy = {best_energy:.6f}")
+    print(f"Final energy = {best_energy:.6f} (target = {target_energy})")
     result = {'x': best_x, 'f': best_energy}
     
     if write_csv:
@@ -275,7 +302,7 @@ if __name__ == "__main__":
     print("Initial Energy:", init_E)
     plot_protein_3d(initial_positions, title="Initial Configuration")
     
-    # Optimize using our custom BFGS (with perturbed restarts if necessary).
+    # Optimize using our custom BFGS with perturbed restarts.
     result, trajectory = optimize_protein(initial_positions, n_beads, write_csv=True, maxiter=10000, tol=1e-4)
     
     optimized_positions = result['x'].reshape((n_beads, dimension))
