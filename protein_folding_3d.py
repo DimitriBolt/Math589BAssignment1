@@ -75,14 +75,14 @@ def total_energy_with_grad(x, n_beads, epsilon=1.0, sigma=1.0, b=1.0, k_b=100.0)
         grad[i+1] += d_grad
 
     # ---- Lennard-Jones Energy and its Gradient (vectorized) ----
-    # Compute all pairwise differences: differences[i, j, :] = positions[i] - positions[j]
+    # Compute all pairwise differences: diff[i,j,:] = positions[i] - positions[j]
     diff = positions[:, None, :] - positions[None, :, :]  # shape (n_beads, n_beads, n_dim)
     # Compute pairwise distances:
-    r = np.linalg.norm(diff, axis=2)  # shape (n_beads, n_beads)
+    r_mat = np.linalg.norm(diff, axis=2)  # shape (n_beads, n_beads)
     
-    # We want to consider only pairs with i < j. Use triu_indices.
+    # We want to consider only pairs with i < j.
     idx_i, idx_j = np.triu_indices(n_beads, k=1)
-    r_ij = r[idx_i, idx_j]
+    r_ij = r_mat[idx_i, idx_j]
     
     # Avoid singularities: mask pairs where r is too small.
     valid = r_ij >= 1e-2
@@ -97,11 +97,8 @@ def total_energy_with_grad(x, n_beads, epsilon=1.0, sigma=1.0, b=1.0, k_b=100.0)
     # Get corresponding difference vectors for valid pairs:
     diff_ij = diff[idx_i, idx_j]  # shape (num_pairs, n_dim)
     diff_valid = diff_ij[valid]   # shape (num_valid, n_dim)
-    # Normalize the difference vectors:
-    normed = diff_valid / r_valid[:, None]
-    # Contribution to gradient from each valid pair:
+    # Gradient contribution for a pair is: (dE_dr / r) * (difference vector)
     contrib = (dE_dr[:, None] / r_valid[:, None]) * diff_valid  # shape (num_valid, n_dim)
-    # Accumulate contributions: for pair (i, j), add to grad[i] and subtract from grad[j]
     valid_i = idx_i[valid]
     valid_j = idx_j[valid]
     np.add.at(grad, valid_i, contrib)
@@ -110,7 +107,7 @@ def total_energy_with_grad(x, n_beads, epsilon=1.0, sigma=1.0, b=1.0, k_b=100.0)
     return energy, grad.flatten()
 
 # -----------------------------
-# Optimization Function
+# Optimization Function with Refinement
 # -----------------------------
 def optimize_protein(positions, n_beads, write_csv=False, maxiter=1000, tol=1e-6):
     """
@@ -152,6 +149,7 @@ def optimize_protein(positions, n_beads, write_csv=False, maxiter=1000, tol=1e-6
         if len(trajectory) % 20 == 0:
             print(f"Iteration {len(trajectory)}")
 
+    # First optimization call.
     result = minimize(
         fun=total_energy_with_grad,
         x0=positions.flatten(),
@@ -162,6 +160,33 @@ def optimize_protein(positions, n_beads, write_csv=False, maxiter=1000, tol=1e-6
         tol=tol,
         options={'maxiter': maxiter, 'disp': True}
     )
+
+    # Check gradient norm of final solution.
+    energy_val, grad_val = total_energy_with_grad(result.x, n_beads)
+    grad_norm = np.linalg.norm(grad_val)
+    print(f"Initial minimization complete, gradient norm = {grad_norm:.8f}")
+
+    # If gradient norm is still above tol, refine further.
+    refinement_iter = 0
+    max_refinements = 10  # limit the number of extra refinements
+    while grad_norm > tol and refinement_iter < max_refinements:
+        print(f"Refinement iteration {refinement_iter+1}: gradient norm = {grad_norm:.8f} > tol ({tol})")
+        # Continue optimization from current solution.
+        result = minimize(
+            fun=total_energy_with_grad,
+            x0=result.x,
+            args=(n_beads,),
+            method='BFGS',
+            jac=True,
+            tol=tol,
+            options={'maxiter': maxiter, 'disp': False}
+        )
+        energy_val, grad_val = total_energy_with_grad(result.x, n_beads)
+        grad_norm = np.linalg.norm(grad_val)
+        refinement_iter += 1
+
+    print(f"Final gradient norm after refinement: {grad_norm:.8f}")
+
     if write_csv:
         csv_filepath = f'protein{n_beads}.csv'
         print(f'Writing data to file {csv_filepath}')
@@ -223,7 +248,7 @@ def animate_optimization(trajectory, interval=100):
 # Main Function
 # -----------------------------
 if __name__ == "__main__":
-    n_beads = 200  # try with 200 beads (or adjust for testing)
+    n_beads = 200  # you can test with 200 beads (or adjust as needed)
     dimension = 3
     initial_positions = initialize_protein(n_beads, dimension)
 
@@ -231,7 +256,7 @@ if __name__ == "__main__":
     print("Initial Energy:", init_E)
     plot_protein_3d(initial_positions, title="Initial Configuration")
 
-    result, trajectory = optimize_protein(initial_positions, n_beads, write_csv=True, maxiter=10000, tol=1e-6)
+    result, trajectory = optimize_protein(initial_positions, n_beads, write_csv=True, maxiter=10000, tol=0.0005)
 
     optimized_positions = result.x.reshape((n_beads, dimension))
     opt_E, _ = total_energy_with_grad(optimized_positions.flatten(), n_beads)
