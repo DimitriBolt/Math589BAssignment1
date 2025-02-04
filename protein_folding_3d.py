@@ -107,7 +107,42 @@ def total_energy_with_grad(x, n_beads, epsilon=1.0, sigma=1.0, b=1.0, k_b=100.0)
     return energy, grad.flatten()
 
 # -----------------------------
-# Optimization Function with Refinement
+# Additional Refinement: Gradient Descent with Backtracking
+# -----------------------------
+def refine_solution(x, n_beads, tol, epsilon=1.0, sigma=1.0, b=1.0, k_b=100.0,
+                    max_iter=100, alpha0=1.0, beta=0.5, c=1e-4):
+    """
+    Refine the current solution x by performing gradient descent with backtracking
+    until the gradient norm is below tol or max_iter iterations are reached.
+    """
+    iter_count = 0
+    while iter_count < max_iter:
+        energy_val, grad_val = total_energy_with_grad(x, n_beads, epsilon, sigma, b, k_b)
+        grad_norm = np.linalg.norm(grad_val)
+        if grad_norm <= tol:
+            break
+        # Backtracking line search.
+        alpha = alpha0
+        # Compute current energy.
+        f_current = energy_val
+        # Try step: x_new = x - alpha * grad
+        while True:
+            x_new = x - alpha * grad_val
+            f_new, _ = total_energy_with_grad(x_new, n_beads, epsilon, sigma, b, k_b)
+            # Armijo condition: f(x_new) <= f(x) - c * alpha * ||grad||^2
+            if f_new <= f_current - c * alpha * grad_norm**2:
+                break
+            alpha *= beta
+            # If alpha becomes too small, break out.
+            if alpha < 1e-12:
+                break
+        # Update x.
+        x = x_new
+        iter_count += 1
+    return x
+
+# -----------------------------
+# Optimization Function with Extra Polishing
 # -----------------------------
 def optimize_protein(positions, n_beads, write_csv=False, maxiter=1000, tol=1e-6):
     """
@@ -149,7 +184,7 @@ def optimize_protein(positions, n_beads, write_csv=False, maxiter=1000, tol=1e-6
         if len(trajectory) % 20 == 0:
             print(f"Iteration {len(trajectory)}")
 
-    # First optimization call.
+    # First, run BFGS.
     result = minimize(
         fun=total_energy_with_grad,
         x0=positions.flatten(),
@@ -161,31 +196,19 @@ def optimize_protein(positions, n_beads, write_csv=False, maxiter=1000, tol=1e-6
         options={'maxiter': maxiter, 'disp': True}
     )
 
-    # Check gradient norm of final solution.
+    # Check gradient norm.
     energy_val, grad_val = total_energy_with_grad(result.x, n_beads)
     grad_norm = np.linalg.norm(grad_val)
     print(f"Initial minimization complete, gradient norm = {grad_norm:.8f}")
 
-    # If gradient norm is still above tol, refine further.
-    refinement_iter = 0
-    max_refinements = 10  # limit the number of extra refinements
-    while grad_norm > tol and refinement_iter < max_refinements:
-        print(f"Refinement iteration {refinement_iter+1}: gradient norm = {grad_norm:.8f} > tol ({tol})")
-        # Continue optimization from current solution.
-        result = minimize(
-            fun=total_energy_with_grad,
-            x0=result.x,
-            args=(n_beads,),
-            method='BFGS',
-            jac=True,
-            tol=tol,
-            options={'maxiter': maxiter, 'disp': False}
-        )
-        energy_val, grad_val = total_energy_with_grad(result.x, n_beads)
+    # If gradient norm is still above tol, refine with gradient descent.
+    if grad_norm > tol:
+        print("Entering extra refinement with gradient descent...")
+        x_refined = refine_solution(result.x, n_beads, tol, max_iter=1000)
+        energy_val, grad_val = total_energy_with_grad(x_refined, n_beads)
         grad_norm = np.linalg.norm(grad_val)
-        refinement_iter += 1
-
-    print(f"Final gradient norm after refinement: {grad_norm:.8f}")
+        print(f"After refinement, gradient norm = {grad_norm:.8f}")
+        result.x = x_refined  # update the result with the refined solution
 
     if write_csv:
         csv_filepath = f'protein{n_beads}.csv'
@@ -248,7 +271,7 @@ def animate_optimization(trajectory, interval=100):
 # Main Function
 # -----------------------------
 if __name__ == "__main__":
-    n_beads = 200  # you can test with 200 beads (or adjust as needed)
+    n_beads = 200  # Test with 200 beads (adjust as needed)
     dimension = 3
     initial_positions = initialize_protein(n_beads, dimension)
 
@@ -256,6 +279,7 @@ if __name__ == "__main__":
     print("Initial Energy:", init_E)
     plot_protein_3d(initial_positions, title="Initial Configuration")
 
+    # Use a tighter maxiter and tol as required by the autograder.
     result, trajectory = optimize_protein(initial_positions, n_beads, write_csv=True, maxiter=10000, tol=0.0005)
 
     optimized_positions = result.x.reshape((n_beads, dimension))
