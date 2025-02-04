@@ -35,11 +35,13 @@ def bond_potential(r, b=1.0, k_b=100.0):
     return k_b * (r - b)**2
 
 # -----------------------------
-# Total Energy and Analytic Gradient
+# Total Energy and Analytic Gradient (Vectorized LJ)
 # -----------------------------
 def total_energy_with_grad(x, n_beads, epsilon=1.0, sigma=1.0, b=1.0, k_b=100.0):
     """
     Compute the total energy of the protein conformation and its analytic gradient.
+    
+    This version uses a vectorized computation for the Lennard-Jones interactions.
     
     Parameters:
       x        : flattened numpy array containing the positions.
@@ -57,43 +59,54 @@ def total_energy_with_grad(x, n_beads, epsilon=1.0, sigma=1.0, b=1.0, k_b=100.0)
     energy = 0.0
     grad = np.zeros_like(positions)
 
-    # ---- Bond Energy and its Gradient ----
-    # For each pair of adjacent beads
+    # ---- Bond Energy and its Gradient (loop over bonds) ----
     for i in range(n_beads - 1):
         d_vec = positions[i+1] - positions[i]
         r = np.linalg.norm(d_vec)
         if r == 0:
-            continue  # safeguard against division by zero
+            continue  # safeguard
         # Bond energy: f_bond = k_b * (r - b)**2
         energy += bond_potential(r, b, k_b)
         # Derivative: df/dr = 2 * k_b * (r - b)
         dE_dr = 2 * k_b * (r - b)
-        # The gradient with respect to positions[i] and positions[i+1]
-        # Note: d(r)/d(positions[i]) = -(d_vec)/r, and for positions[i+1] it is + (d_vec)/r.
+        # Gradient contributions:
         d_grad = (dE_dr / r) * d_vec
         grad[i]   -= d_grad
         grad[i+1] += d_grad
 
-    # ---- Lennard-Jones Energy and its Gradient ----
-    # For each pair of non-bonded beads (i < j)
-    for i in range(n_beads):
-        for j in range(i+1, n_beads):
-            d_vec = positions[i] - positions[j]
-            r = np.linalg.norm(d_vec)
-            # Skip if too close to avoid singularity
-            if r < 1e-2:
-                continue
-            # LJ energy: f_LJ = 4*epsilon*((sigma/r)**12 - (sigma/r)**6)
-            lj_energy = lennard_jones_potential(r, epsilon, sigma)
-            energy += lj_energy
-            # Derivative: df/dr = 4*epsilon*( -12*sigma**12/r**13 + 6*sigma**6/r**7 )
-            dE_dr = 4 * epsilon * (-12 * sigma**12 / r**13 + 6 * sigma**6 / r**7)
-            # Gradient contribution: (df/dr) * (d_vec/r) for positions[i] and the negative for positions[j]
-            d_grad = (dE_dr / r) * d_vec
-            grad[i] += d_grad
-            grad[j] -= d_grad
-
-    # Flatten the gradient to match the shape of x
+    # ---- Lennard-Jones Energy and its Gradient (vectorized) ----
+    # Compute all pairwise differences: differences[i, j, :] = positions[i] - positions[j]
+    diff = positions[:, None, :] - positions[None, :, :]  # shape (n_beads, n_beads, n_dim)
+    # Compute pairwise distances:
+    r = np.linalg.norm(diff, axis=2)  # shape (n_beads, n_beads)
+    
+    # We want to consider only pairs with i < j. Use triu_indices.
+    idx_i, idx_j = np.triu_indices(n_beads, k=1)
+    r_ij = r[idx_i, idx_j]
+    
+    # Avoid singularities: mask pairs where r is too small.
+    valid = r_ij >= 1e-2
+    r_valid = r_ij[valid]
+    
+    # Compute the Lennard-Jones energy contributions for valid pairs:
+    LJ_energy = 4 * epsilon * ((sigma / r_valid)**12 - (sigma / r_valid)**6)
+    energy += np.sum(LJ_energy)
+    
+    # Compute derivative dE/dr for valid pairs:
+    dE_dr = 4 * epsilon * (-12 * sigma**12 / r_valid**13 + 6 * sigma**6 / r_valid**7)
+    # Get corresponding difference vectors for valid pairs:
+    diff_ij = diff[idx_i, idx_j]  # shape (num_pairs, n_dim)
+    diff_valid = diff_ij[valid]   # shape (num_valid, n_dim)
+    # Normalize the difference vectors:
+    normed = diff_valid / r_valid[:, None]
+    # Contribution to gradient from each valid pair:
+    contrib = (dE_dr[:, None] / r_valid[:, None]) * diff_valid  # shape (num_valid, n_dim)
+    # Accumulate contributions: for pair (i, j), add to grad[i] and subtract from grad[j]
+    valid_i = idx_i[valid]
+    valid_j = idx_j[valid]
+    np.add.at(grad, valid_i, contrib)
+    np.add.at(grad, valid_j, -contrib)
+    
     return energy, grad.flatten()
 
 # -----------------------------
@@ -139,7 +152,6 @@ def optimize_protein(positions, n_beads, write_csv=False, maxiter=1000, tol=1e-6
         if len(trajectory) % 20 == 0:
             print(f"Iteration {len(trajectory)}")
 
-    # Call minimize using our analytic energy+gradient function.
     result = minimize(
         fun=total_energy_with_grad,
         x0=positions.flatten(),
@@ -204,26 +216,26 @@ def animate_optimization(trajectory, interval=100):
         ax.set_title(f"Step {frame + 1}/{len(trajectory)}")
         return line,
 
-    ani = FuncAnimation(
-        fig, update, frames=len(trajectory), interval=interval, blit=False
-    )
+    ani = FuncAnimation(fig, update, frames=len(trajectory), interval=interval, blit=False)
     plt.show()
 
 # -----------------------------
 # Main Function
 # -----------------------------
 if __name__ == "__main__":
-    n_beads = 100
+    n_beads = 200  # try with 200 beads (or adjust for testing)
     dimension = 3
     initial_positions = initialize_protein(n_beads, dimension)
 
-    print("Initial Energy:", total_energy_with_grad(initial_positions.flatten(), n_beads)[0])
+    init_E, _ = total_energy_with_grad(initial_positions.flatten(), n_beads)
+    print("Initial Energy:", init_E)
     plot_protein_3d(initial_positions, title="Initial Configuration")
 
-    result, trajectory = optimize_protein(initial_positions, n_beads, write_csv=True, maxiter=3000, tol=1e-6)
+    result, trajectory = optimize_protein(initial_positions, n_beads, write_csv=True, maxiter=10000, tol=1e-6)
 
     optimized_positions = result.x.reshape((n_beads, dimension))
-    print("Optimized Energy:", total_energy_with_grad(optimized_positions.flatten(), n_beads)[0])
+    opt_E, _ = total_energy_with_grad(optimized_positions.flatten(), n_beads)
+    print("Optimized Energy:", opt_E)
     plot_protein_3d(optimized_positions, title="Optimized Configuration")
 
     # Animate the optimization process
