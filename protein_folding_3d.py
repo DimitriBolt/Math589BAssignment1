@@ -166,23 +166,11 @@ def optimize_protein(positions, n_beads, write_csv=False, maxiter=10000, tol=1e-
     )
     
     # Overwrite the fields of the dummy result with your computed values.
-    # dummy_result.x = best_x
-    # dummy_result.fun = best_energy
     dummy_result.nit = len(traj) - 1
     dummy_result.success = True
     dummy_result.status = 0
     dummy_result.message = "Optimization terminated successfully."
-    
-    # Compute the final gradient.
-    # _, jac = total_energy_with_grad(best_x, n_beads)
-    # dummy_result.jac = jac  # leave as 1D array if that is what's expected
-    # dummy_result.hess_inv = np.eye(len(best_x)) * 0.1
-    # dummy_result.nfev = 0
-    # dummy_result.njev = 0
-    
-    # Reshape the trajectory.
-    # d = positions.shape[1]
-    # trajectory_reshaped = [x.reshape((n_beads, d)) for x in best_traj]
+
     if write_csv:
         csv_filepath = f'protein{n_beads}.csv'
         print(f'Writing data to file {csv_filepath}')
@@ -232,7 +220,7 @@ def animate_optimization(trajectory, interval=100):
 # Main Function
 # -----------------------------
 if __name__ == "__main__":
-    n_beads = 10
+    n_beads = 100
     dimension = 3
     initial_positions = initialize_protein(n_beads, dimension)
     init_E, _ = total_energy_with_grad(initial_positions.flatten(), n_beads)
