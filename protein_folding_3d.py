@@ -80,7 +80,7 @@ def total_energy_with_grad(x, n_beads, epsilon=1.0, sigma=1.0, b=1.0, k_b=100.0)
 # -----------------------------
 # Bespoke BFGS with Backtracking
 # -----------------------------
-def bfgs_optimize(func, x0, args, maxiter=1000, tol=1e-6, alpha0=1.0, beta=0.5, c=1e-4):
+def bfgs_optimize(func, x0, args, n_beads, maxiter=1000, tol=1e-6, alpha0=1.0, beta=0.5, c=1e-4):
     x = x0.copy()
     n = len(x)
     H = np.eye(n)
@@ -127,7 +127,7 @@ def optimize_protein(positions, n_beads, write_csv=False, maxiter=10000, tol=1e-
     args = (n_beads,)
     
     # Run your bespoke BFGS with backtracking.
-    x_opt, traj = bfgs_optimize(total_energy_with_grad, x0, args, maxiter=maxiter, tol=tol)
+    x_opt, traj = bfgs_optimize(total_energy_with_grad, x0, args, n_beads, maxiter=maxiter, tol=tol)
     f_final, _ = total_energy_with_grad(x_opt, n_beads)
     print(f"Initial bespoke BFGS: f = {f_final:.6f}")
     
@@ -142,7 +142,7 @@ def optimize_protein(positions, n_beads, write_csv=False, maxiter=10000, tol=1e-
         for i in range(n_perturb):
             print(f"Perturbed restart {i+1}...")
             x_perturbed = best_x + np.random.normal(scale=noise_scale, size=best_x.shape)
-            x_new, traj_new = bfgs_optimize(total_energy_with_grad, x_perturbed, args, maxiter=maxiter//2, tol=tol)
+            x_new, traj_new = bfgs_optimize(total_energy_with_grad, x_perturbed, args, n_beads, maxiter=maxiter//2, tol=tol)
             f_new, _ = total_energy_with_grad(x_new, n_beads)
             print(f"  Restart {i+1}: f = {f_new:.6f}")
             if f_new < best_energy:
