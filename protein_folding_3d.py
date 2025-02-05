@@ -308,7 +308,7 @@ def animate_optimization(trajectory, interval=100):
 # Main Function
 # -----------------------------
 if __name__ == "__main__":
-    n_beads = 100  # Adjust as needed (here testing with 200 beads)
+    n_beads = 200  # Adjust as needed (here testing with 200 beads)
     dimension = 3
     initial_positions = initialize_protein(n_beads, dimension)
 
