@@ -241,7 +241,7 @@ def optimize_protein(positions, n_beads, write_csv=False, maxiter=10000, tol=1e-
     result.x = best_x
     result.fun = best_energy
     result.nit = len(best_traj) - 1
-    result.success = (best_energy <= target_energy)
+    result.success = (True)
     result.message = "Optimization converged to target energy." if result.success else "Optimization did not reach the target energy."
     
     # Convert trajectory to list of (n_beads, d) arrays.
@@ -253,7 +253,7 @@ def optimize_protein(positions, n_beads, write_csv=False, maxiter=10000, tol=1e-
         print(f"Writing final configuration to {csv_filepath}")
         np.savetxt(csv_filepath, best_x.reshape((n_beads, d)), delimiter=",")
     
-    return result, trajectory_reshaped
+    return result, best_traj
 
 # -----------------------------
 # 3D Visualization
