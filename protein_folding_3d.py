@@ -211,6 +211,7 @@ def optimize_protein(positions, n_beads, write_csv=False, maxiter=1000, tol=1e-6
       result     : the result from the optimization (scipy.optimize.OptimizeResult)
       trajectory : a list of intermediate configurations (each of shape (n_beads, d))
     """
+    target_energy = get_target_energy(n_beads)
     trajectory = []
     def callback(x):
         trajectory.append(x.reshape((n_beads, -1)))
@@ -235,13 +236,16 @@ def optimize_protein(positions, n_beads, write_csv=False, maxiter=1000, tol=1e-6
     print(f"Initial minimization complete, gradient norm = {grad_norm:.8f}")
 
     # If the gradient norm is still above tol, use gradient descent with backtracking to refine.
-    if grad_norm > tol:
+    if grad_norm > tol or energy_val > target_energy:
         print("Entering extra refinement with gradient descent and backtracking...")
         x_refined = refine_solution(result.x, n_beads, tol, max_iter=1000)
         energy_val, grad_val = total_energy_with_grad(x_refined, n_beads)
         grad_norm = np.linalg.norm(grad_val)
         print(f"After refinement, gradient norm = {grad_norm:.8f}")
         result.x = x_refined  # update the result with the refined solution
+        f_final, _ = total_energy_with_grad(result.x, n_beads)
+        result.fun = f_final
+
 
     if write_csv:
         csv_filepath = f'protein{n_beads}.csv'
