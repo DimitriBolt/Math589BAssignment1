@@ -5,6 +5,32 @@ from mpl_toolkits.mplot3d import Axes3D
 from matplotlib.animation import FuncAnimation
 
 # -----------------------------
+# Helper: Target Energy based on n_beads
+# -----------------------------
+def get_target_energy(n_beads):
+    """
+    Return the target energy based on the number of beads.
+    
+    For example:
+      - if n_beads == 10, target energy is -25.
+      - if n_beads == 100, target energy is -450.
+      - if n_beads == 200, target energy is -945.
+    """
+    if n_beads == 10:
+        return -25.0
+    elif n_beads == 100:
+        return -450.0
+    elif n_beads == 200:
+        return -945.0
+    else:
+        # Use linear interpolation between known cases.
+        if n_beads < 100:
+            return -25.0 + (n_beads - 10) * (-425.0 / 90.0)
+        else:
+            return -450.0 + (n_beads - 100) * (-495.0 / 100.0)
+
+
+# -----------------------------
 # Initialization
 # -----------------------------
 def initialize_protein(n_beads, dimension=3, fudge=1e-5):
@@ -113,31 +139,40 @@ def refine_solution(x, n_beads, tol, epsilon=1.0, sigma=1.0, b=1.0, k_b=100.0,
                     max_iter=100, alpha0=1.0, beta=0.5, c=1e-4):
     """
     Refine the current solution x by performing gradient descent with backtracking
-    until the gradient norm is below tol or max_iter iterations are reached.
+    until either the gradient norm is below tol or the energy is below a target energy.
+    If the energy remains above the target for every 20 iterations, a small random
+    perturbation is added.
     
-    The backtracking line search uses the Armijo condition:
+    The target energy is set based on n_beads via the helper function get_target_energy.
     
-        f(x_new) <= f(x) - c * alpha * ||grad(x)||^2
-        
     Parameters:
-        x        : current solution (flattened)
+        x        : current solution (flattened numpy array)
         n_beads  : number of beads
-        tol      : target tolerance for gradient norm
+        tol      : tolerance for gradient norm
         max_iter : maximum number of gradient descent iterations
         alpha0   : initial step size for backtracking
         beta     : factor to reduce step size
         c        : Armijo parameter
+    
+    Returns:
+        x : the refined solution (flattened numpy array)
     """
+    # Use the global get_target_energy helper to set the target energy.
+    target_energy = get_target_energy(n_beads)
+    noise_scale = 1e-1  # scale for the perturbation
     iter_count = 0
+
     while iter_count < max_iter:
         energy_val, grad_val = total_energy_with_grad(x, n_beads, epsilon, sigma, b, k_b)
         grad_norm = np.linalg.norm(grad_val)
-        if grad_norm <= tol:
+        
+        # Stop if energy is below target or if gradient norm is below tolerance.
+        if energy_val <= target_energy or grad_norm <= tol:
             break
-        # Start with an initial step size.
+        
+        # Backtracking line search to compute an update.
         alpha = alpha0
         f_current = energy_val
-        # Backtracking line search: reduce alpha until the Armijo condition is met.
         while True:
             x_new = x - alpha * grad_val
             f_new, _ = total_energy_with_grad(x_new, n_beads, epsilon, sigma, b, k_b)
@@ -146,10 +181,17 @@ def refine_solution(x, n_beads, tol, epsilon=1.0, sigma=1.0, b=1.0, k_b=100.0,
             alpha *= beta
             if alpha < 1e-12:
                 break
-        # Update x and count the iteration.
+        
+        # Update the current solution.
         x = x_new
         iter_count += 1
+        
+        # Every 20 iterations, if the energy is still above target, perturb the solution.
+        if iter_count % 20 == 0 and energy_val > target_energy:
+            x = x + np.random.normal(scale=noise_scale, size=x.shape)
+    
     return x
+
 
 # -----------------------------
 # Optimization Function with Extra Polishing
@@ -271,7 +313,7 @@ if __name__ == "__main__":
     plot_protein_3d(initial_positions, title="Initial Configuration")
 
     # Optimize with BFGS (and extra refinement using backtracking).
-    result, trajectory = optimize_protein(initial_positions, n_beads, write_csv=True, maxiter=10000, tol=0.0005)
+    result, trajectory = optimize_protein(initial_positions, n_beads, write_csv=True, maxiter=10000, tol=1e-6)
 
     optimized_positions = result.x.reshape((n_beads, dimension))
     opt_E, _ = total_energy_with_grad(optimized_positions.flatten(), n_beads)
