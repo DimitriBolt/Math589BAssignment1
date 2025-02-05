@@ -244,3 +244,4 @@ if __name__ == "__main__":
     print("Optimized Energy:", opt_E)
     plot_protein_3d(optimized_positions, title="Optimized Configuration")
     animate_optimization(trajectory)
+    print(result)
