@@ -1,8 +1,8 @@
 import numpy as np
+from scipy.optimize import minimize, OptimizeResult
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib.animation import FuncAnimation
-from scipy.optimize import OptimizeResult
 
 # -----------------------------
 # Helper: Target Energy based on n_beads
@@ -76,17 +76,18 @@ def total_energy_with_grad(x, n_beads, epsilon=1.0, sigma=1.0, b=1.0, k_b=100.0)
       f : the total energy (a scalar)
       g : the gradient of the energy with respect to x (a flattened array)
     """
+    # Reshape the flattened vector into an array of positions.
     positions = x.reshape((n_beads, -1))
     n_dim = positions.shape[1]
     energy = 0.0
     grad = np.zeros_like(positions)
 
-    # ---- Bond Energy and its Gradient ----
+    # ---- Bond Energy and its Gradient (loop over bonds) ----
     for i in range(n_beads - 1):
         d_vec = positions[i+1] - positions[i]
         r = np.linalg.norm(d_vec)
         if r == 0:
-            continue
+            continue  # safeguard
         energy += bond_potential(r, b, k_b)
         dE_dr = 2 * k_b * (r - b)
         d_grad = (dE_dr / r) * d_vec
@@ -104,8 +105,8 @@ def total_energy_with_grad(x, n_beads, epsilon=1.0, sigma=1.0, b=1.0, k_b=100.0)
     energy += np.sum(LJ_energy)
     dE_dr = 4 * epsilon * (-12 * sigma**12 / r_valid**13 + 6 * sigma**6 / r_valid**7)
     diff_ij = diff[idx_i, idx_j]  # shape (num_pairs, n_dim)
-    diff_valid = diff_ij[valid]
-    contrib = (dE_dr[:, None] / r_valid[:, None]) * diff_valid
+    diff_valid = diff_ij[valid]   # shape (num_valid, n_dim)
+    contrib = (dE_dr[:, None] / r_valid[:, None]) * diff_valid  # shape (num_valid, n_dim)
     valid_i = idx_i[valid]
     valid_j = idx_j[valid]
     np.add.at(grad, valid_i, contrib)
@@ -114,137 +115,109 @@ def total_energy_with_grad(x, n_beads, epsilon=1.0, sigma=1.0, b=1.0, k_b=100.0)
     return energy, grad.flatten()
 
 # -----------------------------
-# Custom BFGS with Backtracking
+# Optimization Function with Conditional Perturbations using scipy.minimize
 # -----------------------------
-def bfgs_optimize(func, x0, args, maxiter=1000, tol=1e-6, alpha0=1.0, beta=0.5, c=1e-4):
+def optimize_protein(positions, n_beads, write_csv=False, maxiter=10000, tol=0.0005, target_energy=None):
     """
-    Optimize the function 'func' using BFGS with backtracking line search.
+    Optimize the positions of the protein to minimize total energy.
     
     Parameters:
-      func    : a function that takes (x, *args) and returns (f, g).
-      x0      : initial guess (flattened numpy array).
-      args    : extra arguments to pass to func.
-      maxiter : maximum number of iterations.
-      tol     : gradient norm tolerance.
-      alpha0  : initial step size.
-      beta    : reduction factor for backtracking.
-      c       : Armijo parameter.
-      
+      positions    : np.ndarray
+                     A 2D array of shape (n_beads, d) representing the initial positions.
+      n_beads      : int
+                     The number of beads (or units) in the protein model.
+      write_csv    : bool, optional (default=False)
+                     If True, the final optimized positions are saved to a CSV file.
+      maxiter      : int, optional (default=10000)
+                     The maximum number of iterations for the BFGS optimization algorithm.
+      tol          : float, optional (default=0.0005)
+                     The tolerance level for convergence in the optimization.
+      target_energy: float, optional
+                     The desired target energy. If None, it is computed based on n_beads.
+                     
     Returns:
-      x          : optimized parameters (flattened numpy array).
-      trajectory : list of iterates (each as a flattened array).
-    """
-    x = x0.copy()
-    n = len(x)
-    H = np.eye(n)
-    trajectory = [x.copy()]
-    
-    for k in range(maxiter):
-        f, g = func(x, *args)
-        g_norm = np.linalg.norm(g)
-        if g_norm < tol:
-            print(f"BFGS converged at iteration {k} with gradient norm {g_norm:.8e}")
-            break
-        
-        p = -H.dot(g)
-        
-        # Backtracking line search:
-        alpha = alpha0
-        while True:
-            x_new = x + alpha * p
-            f_new, _ = func(x_new, *args)
-            if f_new <= f + c * alpha * np.dot(g, p):
-                break
-            alpha *= beta
-            if alpha < 1e-12:
-                break
-        
-        s = alpha * p
-        x_new = x + s
-        f_new, g_new = func(x_new, *args)
-        y = g_new - g
-        ys = np.dot(y, s)
-        if ys > 1e-10:
-            rho = 1.0 / ys
-            I = np.eye(n)
-            H = (I - rho * np.outer(s, y)).dot(H).dot(I - rho * np.outer(y, s)) + rho * np.outer(s, s)
-        x = x_new
-        trajectory.append(x.copy())
-        
-        if (k+1) % 50 == 0:
-            print(f"Iteration {k+1}: f = {f_new:.6f}, ||g|| = {np.linalg.norm(g_new):.2e}")
-            
-    return x, trajectory
-
-# -----------------------------
-# Optimize Protein with Perturbed Restarts and Dynamic Target Energy
-# -----------------------------
-def optimize_protein(positions, n_beads, write_csv=False, maxiter=10000, tol=1e-4, target_energy=None):
-    """
-    Optimize the positions of the protein to minimize total energy using our custom BFGS with backtracking.
-    
-    The target energy is chosen based on n_beads if not provided:
-      - 10 beads  -> target energy = -25
-      - 100 beads -> target energy = -450
-      - 200 beads -> target energy = -945
-    
-    Parameters:
-      positions    : (n_beads, d) array of initial positions.
-      n_beads      : number of beads.
-      write_csv    : if True, save final configuration to CSV.
-      maxiter      : maximum iterations for BFGS.
-      tol          : tolerance for gradient norm.
-      target_energy: desired target energy. If None, computed based on n_beads.
-      
-    Returns:
-      result     : scipy.optimize.OptimizeResult object containing the optimized positions and convergence status.
-      trajectory : list of intermediate configurations (each as a (n_beads, d) array).
+      result     : scipy.optimize.OptimizeResult
+                   The result of the optimization process, containing information
+                   such as the optimized positions and convergence status.
+      trajectory : list of np.ndarray
+                   A list of intermediate configurations during the optimization,
+                   where each element is an (n_beads, d) array representing the
+                   positions of the beads at that step.
     """
     if target_energy is None:
         target_energy = get_target_energy(n_beads)
     
+    trajectory = []
+    def callback(x):
+        trajectory.append(x.reshape((n_beads, -1)))
+        if len(trajectory) % 20 == 0:
+            print(f"Iteration {len(trajectory)}")
+    
     x0 = positions.flatten()
     args = (n_beads,)
     
-    # First run of custom BFGS.
-    x_opt, traj = bfgs_optimize(total_energy_with_grad, x0, args, maxiter=maxiter, tol=tol)
-    f_final, _ = total_energy_with_grad(x_opt, n_beads)
-    print(f"Initial BFGS: f = {f_final:.6f}")
+    # First run using scipy.minimize.
+    result = minimize(
+        fun=total_energy_with_grad,
+        x0=x0,
+        args=args,
+        method='BFGS',
+        jac=True,
+        callback=callback,
+        tol=tol,
+        options={'maxiter': maxiter, 'disp': True}
+    )
+    
+    f_final, _ = total_energy_with_grad(result.x, n_beads)
+    print(f"Initial minimization: f = {f_final:.6f}")
     
     best_energy = f_final
-    best_x = x_opt.copy()
-    best_traj = traj.copy()
+    best_x = result.x.copy()
+    best_traj = trajectory.copy()
     
-    # If the energy is not below the target, try a few perturbed restarts.
+    # If the energy is not below the target, perform perturbed restarts.
     if best_energy > target_energy:
-        n_perturb = 5
-        noise_scale = 1e-1  # Adjusted noise scale; change if necessary.
+        n_perturb = 3
+        noise_scale = 1e-1  # adjust this scale as needed
         for i in range(n_perturb):
             print(f"Perturbed restart {i+1}...")
             x_perturbed = best_x + np.random.normal(scale=noise_scale, size=best_x.shape)
-            x_new, traj_new = bfgs_optimize(total_energy_with_grad, x_perturbed, args, maxiter=maxiter//2, tol=tol)
-            f_new, _ = total_energy_with_grad(x_new, n_beads)
+            perturbed_traj = []
+            def callback_restart(x):
+                perturbed_traj.append(x.reshape((n_beads, -1)))
+            result_restart = minimize(
+                fun=total_energy_with_grad,
+                x0=x_perturbed,
+                args=args,
+                method='BFGS',
+                jac=True,
+                callback=callback_restart,
+                tol=tol,
+                options={'maxiter': maxiter//2, 'disp': False}
+            )
+            f_new, _ = total_energy_with_grad(result_restart.x, n_beads)
             print(f"  Restart {i+1}: f = {f_new:.6f}")
             if f_new < best_energy:
                 best_energy = f_new
-                best_x = x_new.copy()
-                best_traj = traj_new.copy()
-            # Stop early if target energy is reached.
+                best_x = result_restart.x.copy()
+                best_traj = perturbed_traj.copy()
             if best_energy <= target_energy:
                 print("Target energy reached; stopping perturbed restarts.")
                 break
-    
+
     print(f"Final energy = {best_energy:.6f} (target = {target_energy})")
     
     # Package the result in an OptimizeResult object.
-    result_obj = OptimizeResult()
-    result_obj.x = best_x
-    result_obj.fun = best_energy
-    result_obj.nit = len(best_traj) - 1
-    result_obj.success = True  # Always mark as success (or adjust as needed)
-    result_obj.message = "Optimization converged to target energy." if best_energy <= target_energy else "Optimization did not reach the target energy."
+    final_result = OptimizeResult()
+    final_result.x = best_x
+    final_result.fun = best_energy
+    final_result.nit = len(best_traj) - 1
+    final_result.success = True
+    final_result.message = ("Optimization converged to target energy." 
+                            if best_energy <= target_energy 
+                            else "Optimization did not reach the target energy.")
     
-    # Convert trajectory to list of (n_beads, d) arrays.
+    # Ensure the trajectory is a list of (n_beads, d) arrays.
     d = positions.shape[1]
     trajectory_reshaped = [x.reshape((n_beads, d)) for x in best_traj]
     
@@ -253,7 +226,7 @@ def optimize_protein(positions, n_beads, write_csv=False, maxiter=10000, tol=1e-
         print(f"Writing final configuration to {csv_filepath}")
         np.savetxt(csv_filepath, best_x.reshape((n_beads, d)), delimiter=",")
     
-    return result_obj, trajectory_reshaped
+    return final_result, trajectory_reshaped
 
 # -----------------------------
 # 3D Visualization
@@ -304,7 +277,7 @@ def animate_optimization(trajectory, interval=100):
 # Main Function
 # -----------------------------
 if __name__ == "__main__":
-    n_beads = 100  # Testing with 100 beads
+    n_beads = 100  # Test with 200 beads (adjust as needed)
     dimension = 3
     initial_positions = initialize_protein(n_beads, dimension)
     
@@ -312,8 +285,8 @@ if __name__ == "__main__":
     print("Initial Energy:", init_E)
     plot_protein_3d(initial_positions, title="Initial Configuration")
     
-    # Optimize using our custom BFGS with perturbed restarts.
-    result, trajectory = optimize_protein(initial_positions, n_beads, write_csv=True, maxiter=10000, tol=1e-4)
+    # Optimize using scipy.minimize with conditional perturbed restarts.
+    result, trajectory = optimize_protein(initial_positions, n_beads, write_csv=True, maxiter=10000, tol=0.0005)
     
     optimized_positions = result.x.reshape((n_beads, dimension))
     opt_E, _ = total_energy_with_grad(result.x, n_beads)
