@@ -167,7 +167,7 @@ def refine_solution(x, n_beads, tol, epsilon=1.0, sigma=1.0, b=1.0, k_b=100.0,
         grad_norm = np.linalg.norm(grad_val)
         
         # Stop if energy is below target or if gradient norm is below tolerance.
-        if energy_val <= target_energy or grad_norm <= tol:
+        if energy_val <= target_energy and grad_norm <= tol:
             break
         
         # Backtracking line search to compute an update.
@@ -308,7 +308,7 @@ def animate_optimization(trajectory, interval=100):
 # Main Function
 # -----------------------------
 if __name__ == "__main__":
-    n_beads = 200  # Adjust as needed (here testing with 200 beads)
+    n_beads = 100  # Adjust as needed (here testing with 200 beads)
     dimension = 3
     initial_positions = initialize_protein(n_beads, dimension)
 
@@ -326,3 +326,5 @@ if __name__ == "__main__":
 
     # Animate the optimization process.
     animate_optimization(trajectory)
+
+    print(result)
