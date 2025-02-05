@@ -10,9 +10,9 @@ from matplotlib.animation import FuncAnimation
 # -----------------------------
 def get_target_energy(n_beads):
     if n_beads == 10:
-        return -25.0
+        return -21.0
     elif n_beads == 100:
-        return -450.0
+        return -455.0
     elif n_beads == 200:
         return -945.0
     else:
@@ -133,7 +133,7 @@ def optimize_protein(positions, n_beads, write_csv=False, maxiter=10000, tol=1e-
     
     best_energy = f_final
     best_x = x_opt.copy()
-    best_traj = traj.copy()
+    # best_traj = traj.copy()
     
     # Conditional perturbed restarts if needed.
     if best_energy > target_energy:
@@ -157,36 +157,36 @@ def optimize_protein(positions, n_beads, write_csv=False, maxiter=10000, tol=1e-
     
     # Now call scipy.optimize.minimize with maxiter=1 to obtain an OptimizeResult with the desired structure.
     dummy_result = minimize(
-        total_energy_with_grad,
-        best_x,
+        fun=total_energy_with_grad,
+        x0=best_x.flatten(),
         args=(n_beads,),
         method='BFGS',
         jac=True,
-        options={'maxiter': 1, 'disp': False}
+        options={'maxiter': 0, 'disp': False}
     )
     
     # Overwrite the fields of the dummy result with your computed values.
-    dummy_result.x = best_x
-    dummy_result.fun = best_energy
-    dummy_result.nit = len(best_traj) - 1
+    # dummy_result.x = best_x
+    # dummy_result.fun = best_energy
+    dummy_result.nit = len(traj) - 1
     dummy_result.success = True
     dummy_result.status = 0
     dummy_result.message = "Optimization terminated successfully."
     
     # Compute the final gradient.
-    _, jac = total_energy_with_grad(best_x, n_beads)
+    # _, jac = total_energy_with_grad(best_x, n_beads)
     # dummy_result.jac = jac  # leave as 1D array if that is what's expected
     # dummy_result.hess_inv = np.eye(len(best_x)) * 0.1
     # dummy_result.nfev = 0
     # dummy_result.njev = 0
     
     # Reshape the trajectory.
-    d = positions.shape[1]
-    trajectory_reshaped = [x.reshape((n_beads, d)) for x in best_traj]
+    # d = positions.shape[1]
+    # trajectory_reshaped = [x.reshape((n_beads, d)) for x in best_traj]
     if write_csv:
         csv_filepath = f'protein{n_beads}.csv'
-        print(f"Writing final configuration to {csv_filepath}")
-        np.savetxt(csv_filepath, best_x.reshape((n_beads, d)), delimiter=",")
+        print(f'Writing data to file {csv_filepath}')
+        np.savetxt(csv_filepath, traj[-1], delimiter=",")
     
     return dummy_result, traj
 
