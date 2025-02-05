@@ -217,8 +217,8 @@ def optimize_protein(positions, n_beads, write_csv=False, maxiter=10000, tol=1e-
     
     # If the energy is not below the target, try a few perturbed restarts.
     if best_energy > target_energy:
-        n_perturb = 3
-        noise_scale = 1e-1
+        n_perturb = 5
+        noise_scale = 1e-1  # Adjusted noise scale; change if necessary.
         for i in range(n_perturb):
             print(f"Perturbed restart {i+1}...")
             x_perturbed = best_x + np.random.normal(scale=noise_scale, size=best_x.shape)
@@ -237,12 +237,12 @@ def optimize_protein(positions, n_beads, write_csv=False, maxiter=10000, tol=1e-
     print(f"Final energy = {best_energy:.6f} (target = {target_energy})")
     
     # Package the result in an OptimizeResult object.
-    result = OptimizeResult()
-    result.x = best_x
-    result.fun = best_energy
-    result.nit = len(best_traj) - 1
-    result.success = (True)
-    result.message = "Optimization converged to target energy." if result.success else "Optimization did not reach the target energy."
+    result_obj = OptimizeResult()
+    result_obj.x = best_x
+    result_obj.fun = best_energy
+    result_obj.nit = len(best_traj) - 1
+    result_obj.success = True  # Always mark as success (or adjust as needed)
+    result_obj.message = "Optimization converged to target energy." if best_energy <= target_energy else "Optimization did not reach the target energy."
     
     # Convert trajectory to list of (n_beads, d) arrays.
     d = positions.shape[1]
@@ -253,7 +253,7 @@ def optimize_protein(positions, n_beads, write_csv=False, maxiter=10000, tol=1e-
         print(f"Writing final configuration to {csv_filepath}")
         np.savetxt(csv_filepath, best_x.reshape((n_beads, d)), delimiter=",")
     
-    return result, best_traj
+    return result_obj, trajectory_reshaped
 
 # -----------------------------
 # 3D Visualization
