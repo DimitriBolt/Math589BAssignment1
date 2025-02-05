@@ -135,7 +135,7 @@ def total_energy_with_grad(x, n_beads, epsilon=1.0, sigma=1.0, b=1.0, k_b=100.0)
 # -----------------------------
 # Additional Refinement: Gradient Descent with Backtracking
 # -----------------------------
-def refine_solution(x, n_beads, tol, epsilon=1.0, sigma=1.0, b=1.0, k_b=100.0,
+def refine_solution(x, n_beads, tol, trajectory, epsilon=1.0, sigma=1.0, b=1.0, k_b=100.0,
                     max_iter=100, alpha0=1.0, beta=0.5, c=1e-4):
     """
     Refine the current solution x by performing gradient descent with backtracking
@@ -185,12 +185,13 @@ def refine_solution(x, n_beads, tol, epsilon=1.0, sigma=1.0, b=1.0, k_b=100.0,
         # Update the current solution.
         x = x_new
         iter_count += 1
+        trajectory.append(x.reshape((n_beads, -1)))
         
         # Every 20 iterations, if the energy is still above target, perturb the solution.
-        if iter_count % 20 == 0 and energy_val > target_energy:
+        if iter_count % 50 == 0 and energy_val > target_energy:
             x = x + np.random.normal(scale=noise_scale, size=x.shape)
     
-    return x
+    return x, trajectory
 
 
 # -----------------------------
@@ -238,7 +239,7 @@ def optimize_protein(positions, n_beads, write_csv=False, maxiter=1000, tol=1e-6
     # If the gradient norm is still above tol, use gradient descent with backtracking to refine.
     if grad_norm > tol or energy_val > target_energy:
         print("Entering extra refinement with gradient descent and backtracking...")
-        x_refined = refine_solution(result.x, n_beads, tol, max_iter=1000)
+        x_refined, traj_refined = refine_solution(result.x, n_beads, tol, trajectory, max_iter=1000)
         energy_val, grad_val = total_energy_with_grad(x_refined, n_beads)
         grad_norm = np.linalg.norm(grad_val)
         print(f"After refinement, gradient norm = {grad_norm:.8f}")
@@ -253,7 +254,7 @@ def optimize_protein(positions, n_beads, write_csv=False, maxiter=1000, tol=1e-6
         np.savetxt(csv_filepath, trajectory[-1], delimiter=",")
     
 
-    return result, trajectory
+    return result, traj_refined
 
 # -----------------------------
 # 3D Visualization
@@ -326,5 +327,3 @@ if __name__ == "__main__":
 
     # Animate the optimization process.
     animate_optimization(trajectory)
-
-    print(result)
