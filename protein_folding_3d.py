@@ -84,7 +84,7 @@ def bfgs_optimize(func, x0, args, maxiter=1000, tol=1e-6, alpha0=1.0, beta=0.5, 
     x = x0.copy()
     n = len(x)
     H = np.eye(n)
-    trajectory = [x.flatten().copy()]
+    trajectory = []
     for k in range(maxiter):
         f, g = func(x, *args)
         g_norm = np.linalg.norm(g)
@@ -111,7 +111,7 @@ def bfgs_optimize(func, x0, args, maxiter=1000, tol=1e-6, alpha0=1.0, beta=0.5, 
             I = np.eye(n)
             H = (I - rho * np.outer(s, y)).dot(H).dot(I - rho * np.outer(y, s)) + rho * np.outer(s, s)
         x = x_new
-        trajectory.append(x.flatten().copy())
+        trajectory.append(x.reshape((n_beads, -1)))
         if (k+1) % 50 == 0:
             print(f"Iteration {k+1}: f = {f_new:.6f}, ||g|| = {np.linalg.norm(g_new):.2e}")
     return x, trajectory
@@ -175,10 +175,10 @@ def optimize_protein(positions, n_beads, write_csv=False, maxiter=10000, tol=1e-
     
     # Compute the final gradient.
     _, jac = total_energy_with_grad(best_x, n_beads)
-    dummy_result.jac = jac  # leave as 1D array if that is what's expected
-    dummy_result.hess_inv = np.eye(len(best_x)) * 0.1
-    dummy_result.nfev = 0
-    dummy_result.njev = 0
+    # dummy_result.jac = jac  # leave as 1D array if that is what's expected
+    # dummy_result.hess_inv = np.eye(len(best_x)) * 0.1
+    # dummy_result.nfev = 0
+    # dummy_result.njev = 0
     
     # Reshape the trajectory.
     d = positions.shape[1]
@@ -188,7 +188,7 @@ def optimize_protein(positions, n_beads, write_csv=False, maxiter=10000, tol=1e-
         print(f"Writing final configuration to {csv_filepath}")
         np.savetxt(csv_filepath, best_x.reshape((n_beads, d)), delimiter=",")
     
-    return dummy_result, trajectory_reshaped
+    return dummy_result, traj
 
 
 # -----------------------------
