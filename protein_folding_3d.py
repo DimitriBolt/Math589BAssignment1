@@ -76,7 +76,6 @@ def total_energy_with_grad(x, n_beads, epsilon=1.0, sigma=1.0, b=1.0, k_b=100.0)
       f : the total energy (a scalar)
       g : the gradient of the energy with respect to x (a flattened array)
     """
-    # Reshape the flattened vector into an array of positions.
     positions = x.reshape((n_beads, -1))
     n_dim = positions.shape[1]
     energy = 0.0
@@ -87,7 +86,7 @@ def total_energy_with_grad(x, n_beads, epsilon=1.0, sigma=1.0, b=1.0, k_b=100.0)
         d_vec = positions[i+1] - positions[i]
         r = np.linalg.norm(d_vec)
         if r == 0:
-            continue  # safeguard
+            continue
         energy += bond_potential(r, b, k_b)
         dE_dr = 2 * k_b * (r - b)
         d_grad = (dE_dr / r) * d_vec
@@ -207,15 +206,10 @@ def optimize_protein(positions, n_beads, write_csv=False, maxiter=10000, tol=0.0
 
     print(f"Final energy = {best_energy:.6f} (target = {target_energy})")
     
-    # Package the result in an OptimizeResult object.
-    final_result = OptimizeResult()
-    final_result.x = best_x
-    final_result.fun = best_energy
-    final_result.nit = len(best_traj) - 1
-    final_result.success = True
-    final_result.message = ("Optimization converged to target energy." 
-                            if best_energy <= target_energy 
-                            else "Optimization did not reach the target energy.")
+    # Update the original result object with the best found values.
+    result.x = best_x
+    result.fun = best_energy
+    result.nit = len(best_traj) - 1
     
     # Ensure the trajectory is a list of (n_beads, d) arrays.
     d = positions.shape[1]
@@ -226,7 +220,7 @@ def optimize_protein(positions, n_beads, write_csv=False, maxiter=10000, tol=0.0
         print(f"Writing final configuration to {csv_filepath}")
         np.savetxt(csv_filepath, best_x.reshape((n_beads, d)), delimiter=",")
     
-    return final_result, trajectory_reshaped
+    return result, trajectory_reshaped
 
 # -----------------------------
 # 3D Visualization
@@ -277,7 +271,7 @@ def animate_optimization(trajectory, interval=100):
 # Main Function
 # -----------------------------
 if __name__ == "__main__":
-    n_beads = 100  # Test with 200 beads (adjust as needed)
+    n_beads = 200  # Test with 200 beads (adjust as needed)
     dimension = 3
     initial_positions = initialize_protein(n_beads, dimension)
     
