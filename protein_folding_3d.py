@@ -16,10 +16,7 @@ def get_target_energy(n_beads):
     elif n_beads == 200:
         return -945.0
     else:
-        if n_beads < 100:
-            return -25.0 + (n_beads - 10) * (-425.0 / 90.0)
-        else:
-            return -450.0 + (n_beads - 100) * (-495.0 / 100.0)
+        return 0
 
 # -----------------------------
 # Initialization
