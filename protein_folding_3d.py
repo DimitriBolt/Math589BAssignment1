@@ -42,10 +42,32 @@ def bond_potential(r, b=1.0, k_b=100.0):
 # Total Energy and Analytic Gradient (Vectorized LJ)
 # -----------------------------
 def total_energy_with_grad(flattened_positions, n_beads, epsilon=1.0, sigma=1.0, b=1.0, k_b=100.0):
-    '''
-    This function calculates the **total energy** of a protein structure and computes its **gradient** with respect to the positions of the protein's beads (atoms).
-    Both **bond potentials** (spring-like connections between consecutive beads) and **Lennard-Jones potentials** (particle-particle interactions) are considered.
-    '''
+    """
+    Computes the total potential energy of a protein structure and its analytical gradient using bead positions in 3D space.
+    
+    Inputs:
+    - flattened_positions (numpy.ndarray): A 1D array containing the flattened coordinates of the beads (of shape `n_beads * 3`).
+    - n_beads (int): The number of beads (or points) in the protein chain.
+    - epsilon (float): Depth of the potential well parameter for the Lennard-Jones potential. Default is 1.0.
+    - sigma (float): Finite distance at which the inter-bead potential is zero for Lennard-Jones. Default is 1.0.
+    - b (float): Preferred bond length between adjacent beads. Default is 1.0.
+    - k_b (float): Bond stiffness constant for harmonic bonding. Default is 100.0.
+    
+    Outputs:
+    - energy (float): Total potential energy of the system, composed of bond energy and Lennard-Jones interactions.
+    - grad.flatten() (numpy.ndarray): A flattened 1D array representing the gradient (partial derivatives) of energy with respect to each coordinate.
+    
+    Inner variables:
+    - positions (2D numpy.ndarray): Reshaped bead positions of shape (n_beads, 3).
+    - bond_vector (numpy.ndarray): Vector between two adjacent beads.
+    - r (float): Euclidean distance (magnitude) between two adjacent beads.
+    - bond_gradient (numpy.ndarray): Gradient of bond potential with respect to positions.
+    - pairwise_displacements (numpy.ndarray): Relative displacement vectors between all bead pairs.
+    - r_mat (numpy.ndarray): Distance matrix indicating the pairwise distances between all beads.
+    - r_ij (numpy.ndarray): 1D array of upper-triangle pairwise distances, excluding self-pairs.
+    - LJ_energy (numpy.ndarray): Lennard-Jones potential contribution for valid interacting bead pairs.
+    - contrib (numpy.ndarray): Per-pair energy gradient contributions for valid Lennard-Jones interactions.
+    """
     positions = flattened_positions.reshape((n_beads, -1))
     n_dim = positions.shape[1]
     energy = 0.0
@@ -121,7 +143,44 @@ def bfgs_optimize(func, x0, args, n_beads, maxiter=1000, tol=1e-6, alpha0=1.0, b
 # Bespoke Optimize Protein using BFGS with Backtracking and Conditional Perturbations
 # -----------------------------
 def optimize_protein(positions, n_beads, write_csv=False, maxiter=10000, tol=1e-4, target_energy=None):
-    ''''''
+    """
+    Optimizes the 3D conformation of a protein represented as a chain of beads using a custom BFGS implementation
+    with backtracking line search and conditional perturbations.
+    
+    Input Variables:
+    - positions (numpy.ndarray): Initial 3D positions of the beads, of shape (n_beads, 3).
+    - n_beads (int): The number of beads in the protein chain.
+    - write_csv (bool): If True, writes the final positions of the beads to a CSV file. Default is False.
+    - maxiter (int): Maximum number of iterations for the BFGS optimization. Default is 10000.
+    - tol (float): Tolerance for convergence based on the gradient norm. Default is 1e-4.
+    - target_energy (float): Target energy to achieve through optimization. Default is None 
+                             (uses `get_target_energy` to determine the target).
+    
+    Output Variables:
+    - scipy_result (OptimizeResult): An instance of `scipy.optimize.OptimizeResult` containing the final 
+                                     optimization results such as positions, success status, and message.
+    - traj (list of numpy.ndarray): A list of bead positions during the optimization, representing the trajectory 
+                                     from the initial to the optimized positions.
+    
+    Inner Variables:
+    - target_energy (float): The desired target energy for the optimization.
+    - initial_flattened_positions (numpy.ndarray): Flattened 1D array of initial bead positions.
+    - args (tuple): Extra arguments passed to the BFGS optimizer, including the number of beads.
+    - optimized_flattened_positions (numpy.ndarray): Flattened optimized bead positions after the first BFGS pass.
+    - traj (list of numpy.ndarray): The trajectory of bead positions recorded during the optimization.
+    - f_final (float): The final energy calculated after the first BFGS optimization pass.
+    - lowest_energy_found (float): The lowest energy value found during optimization.
+    - best_flattened_positions (numpy.ndarray): The corresponding flattened positions for the lowest energy.
+    - n_perturb (int): Number of perturbation restarts attempted to escape local minima.
+    - noise_scale (float): Standard deviation for noise added during perturbations.
+    - perturbed_positions (numpy.ndarray): Positions with added noise for each perturbation attempt.
+    - x_new (numpy.ndarray): Flattened positions after an individual BFGS pass following a perturbation.
+    - traj_new (list of numpy.ndarray): Trajectory of positions for a perturbation-based BFGS optimization.
+    - f_new (float): Energy value achieved during a perturbed optimization pass.
+    - best_traj (list of numpy.ndarray): The trajectory corresponding to the lowest energy configuration.
+    - csv_filepath (str): The filepath where the bead positions are saved, if `write_csv` is True.
+    
+    """
     if target_energy is None:
         target_energy = get_target_energy(n_beads)
     
@@ -198,7 +257,7 @@ def plot_protein_3d(positions, title="Protein Conformation", ax=None):
 # -----------------------------
 # Animation Function
 # -----------------------------
-def animate_optimization(trajectory, interval=100):
+def animate_optimization(trajectory, interval=100, filename="protein_animation.gif"):
     fig = plt.figure()
     ax = fig.add_subplot(111, projection='3d')
     line, = ax.plot([], [], [], '-o', markersize=6)
@@ -215,6 +274,7 @@ def animate_optimization(trajectory, interval=100):
         ax.set_title(f"Step {frame + 1}/{len(trajectory)}")
         return line,
     ani = FuncAnimation(fig, update, frames=len(trajectory), interval=interval, blit=False)
+    ani.save(filename, writer="imagemagick")
     plt.show()
 
 # -----------------------------
