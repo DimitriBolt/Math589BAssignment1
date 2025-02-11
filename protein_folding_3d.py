@@ -41,35 +41,39 @@ def bond_potential(r, b=1.0, k_b=100.0):
 # -----------------------------
 # Total Energy and Analytic Gradient (Vectorized LJ)
 # -----------------------------
-def total_energy_with_grad(x, n_beads, epsilon=1.0, sigma=1.0, b=1.0, k_b=100.0):
-    positions = x.reshape((n_beads, -1))
+def total_energy_with_grad(flattened_positions, n_beads, epsilon=1.0, sigma=1.0, b=1.0, k_b=100.0):
+    '''
+    This function calculates the **total energy** of a protein structure and computes its **gradient** with respect to the positions of the protein's beads (atoms).
+    Both **bond potentials** (spring-like connections between consecutive beads) and **Lennard-Jones potentials** (particle-particle interactions) are considered.
+    '''
+    positions = flattened_positions.reshape((n_beads, -1))
     n_dim = positions.shape[1]
     energy = 0.0
     grad = np.zeros_like(positions)
     for i in range(n_beads - 1):
-        d_vec = positions[i+1] - positions[i]
-        r = np.linalg.norm(d_vec)
+        bond_vector = positions[i+1] - positions[i]
+        r = np.linalg.norm(bond_vector)
         if r == 0:
             continue
         energy += bond_potential(r, b, k_b)
         dE_dr = 2 * k_b * (r - b)
-        d_grad = (dE_dr / r) * d_vec
-        grad[i]   -= d_grad
-        grad[i+1] += d_grad
-    diff = positions[:, None, :] - positions[None, :, :]
-    r_mat = np.linalg.norm(diff, axis=2)
+        bond_gradient = (dE_dr / r) * bond_vector
+        grad[i]   -= bond_gradient
+        grad[i+1] += bond_gradient
+    pairwise_displacements = positions[:, None, :] - positions[None, :, :]
+    r_mat = np.linalg.norm(pairwise_displacements, axis=2)
     idx_i, idx_j = np.triu_indices(n_beads, k=1)
     r_ij = r_mat[idx_i, idx_j]
-    valid = r_ij >= 1e-2
-    r_valid = r_ij[valid]
+    valid_interaction_mask = r_ij >= 1e-2
+    r_valid = r_ij[valid_interaction_mask]
     LJ_energy = 4 * epsilon * ((sigma / r_valid)**12 - (sigma / r_valid)**6)
     energy += np.sum(LJ_energy)
     dE_dr = 4 * epsilon * (-12 * sigma**12 / r_valid**13 + 6 * sigma**6 / r_valid**7)
-    diff_ij = diff[idx_i, idx_j]
-    diff_valid = diff_ij[valid]
-    contrib = (dE_dr[:, None] / r_valid[:, None]) * diff_valid
-    valid_i = idx_i[valid]
-    valid_j = idx_j[valid]
+    diff_ij = pairwise_displacements[idx_i, idx_j]
+    valid_displacement_vectors = diff_ij[valid_interaction_mask]
+    contrib = (dE_dr[:, None] / r_valid[:, None]) * valid_displacement_vectors
+    valid_i = idx_i[valid_interaction_mask]
+    valid_j = idx_j[valid_interaction_mask]
     np.add.at(grad, valid_i, contrib)
     np.add.at(grad, valid_j, -contrib)
     return energy, grad.flatten()
@@ -117,45 +121,45 @@ def bfgs_optimize(func, x0, args, n_beads, maxiter=1000, tol=1e-6, alpha0=1.0, b
 # Bespoke Optimize Protein using BFGS with Backtracking and Conditional Perturbations
 # -----------------------------
 def optimize_protein(positions, n_beads, write_csv=False, maxiter=10000, tol=1e-4, target_energy=None):
+    ''''''
     if target_energy is None:
         target_energy = get_target_energy(n_beads)
     
-    x0 = positions.flatten()
+    initial_flattened_positions = positions.flatten()
     args = (n_beads,)
     
     # Run your bespoke BFGS with backtracking.
-    x_opt, traj = bfgs_optimize(total_energy_with_grad, x0, args, n_beads, maxiter=maxiter, tol=tol)
-    f_final, _ = total_energy_with_grad(x_opt, n_beads)
+    optimized_flattened_positions, traj = bfgs_optimize(total_energy_with_grad, initial_flattened_positions, args, n_beads, maxiter=maxiter, tol=tol)
+    f_final, _ = total_energy_with_grad(optimized_flattened_positions, n_beads)
     print(f"Initial bespoke BFGS: f = {f_final:.6f}")
     
-    best_energy = f_final
-    best_x = x_opt.copy()
-    # best_traj = traj.copy()
-    
+    lowest_energy_found = f_final
+    best_flattened_positions = optimized_flattened_positions.copy()
+
     # Conditional perturbed restarts if needed.
-    if best_energy > target_energy:
+    if lowest_energy_found > target_energy:
         n_perturb = 3
         noise_scale = 1e-1
         for i in range(n_perturb):
             print(f"Perturbed restart {i+1}...")
-            x_perturbed = best_x + np.random.normal(scale=noise_scale, size=best_x.shape)
-            x_new, traj_new = bfgs_optimize(total_energy_with_grad, x_perturbed, args, n_beads, maxiter=maxiter//2, tol=tol)
+            perturbed_positions = best_flattened_positions + np.random.normal(scale=noise_scale, size=best_flattened_positions.shape)
+            x_new, traj_new = bfgs_optimize(total_energy_with_grad, perturbed_positions, args, n_beads, maxiter=maxiter//2, tol=tol)
             f_new, _ = total_energy_with_grad(x_new, n_beads)
             print(f"  Restart {i+1}: f = {f_new:.6f}")
-            if f_new < best_energy:
-                best_energy = f_new
-                best_x = x_new.copy()
+            if f_new < lowest_energy_found:
+                lowest_energy_found = f_new
+                best_flattened_positions = x_new.copy()
                 best_traj = traj_new.copy()
-            if best_energy <= target_energy:
+            if lowest_energy_found <= target_energy:
                 print("Target energy reached; stopping perturbed restarts.")
                 break
 
-    print(f"Final energy = {best_energy:.6f} (target = {target_energy})")
+    print(f"Final energy = {lowest_energy_found:.6f} (target = {target_energy})")
     
     # Now call scipy.optimize.minimize with maxiter=1 to obtain an OptimizeResult with the desired structure.
-    dummy_result = minimize(
+    scipy_result = minimize(
         fun=total_energy_with_grad,
-        x0=best_x.flatten(),
+        x0=best_flattened_positions.flatten(),
         args=(n_beads,),
         method='BFGS',
         jac=True,
@@ -163,17 +167,17 @@ def optimize_protein(positions, n_beads, write_csv=False, maxiter=10000, tol=1e-
     )
     
     # Overwrite the fields of the dummy result with your computed values.
-    dummy_result.nit = len(traj) - 1
-    dummy_result.success = True
-    dummy_result.status = 0
-    dummy_result.message = "Optimization terminated successfully."
+    scipy_result.nit = len(traj) - 1
+    scipy_result.success = True
+    scipy_result.status = 0
+    scipy_result.message = "Optimization terminated successfully."
 
     if write_csv:
         csv_filepath = f'protein{n_beads}.csv'
         print(f'Writing data to file {csv_filepath}')
         np.savetxt(csv_filepath, traj[-1], delimiter=",")
     
-    return dummy_result, traj
+    return scipy_result, traj
 
 
 # -----------------------------
